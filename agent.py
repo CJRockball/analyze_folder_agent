@@ -22,15 +22,15 @@ def create_analysis_agent() -> StateGraph:
     workflow.add_node("analyze_python", analyze_python_files)
     workflow.add_node("analyze_other", analyze_other_files)  
     workflow.add_node("insights", generate_insights)
-    workflow.add_node("analysis_report", generate_summary)
+    workflow.add_node("summary_generator", generate_summary)
     
     # Define the flow
     workflow.set_entry_point("discover")
     workflow.add_edge("discover", "analyze_python")
     workflow.add_edge("analyze_python", "analyze_other")
     workflow.add_edge("analyze_other", "insights")
-    workflow.add_edge("insights", "analysis_report")
-    workflow.add_edge("analysis_report", END)
+    workflow.add_edge("insights", "summary_generator")
+    workflow.add_edge("summary_generator", END)
     
     return workflow.compile()
 
@@ -50,7 +50,7 @@ def run_analysis(target_directory: str) -> dict:
             project_type="Unknown",
             overall_quality="Not assessed"
         ),
-        "final_project_summary": "",
+        "analysis_report": "",
         "error_messages": []
     }
     

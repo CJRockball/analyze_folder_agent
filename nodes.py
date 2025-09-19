@@ -15,7 +15,7 @@ def discover_files(state: AnalysisState) -> AnalysisState:
     """Discover and catalog all relevant files in the directory."""
     print(f"🔍 Scanning directory: {state['target_directory']}")
     
-    target_extensions = {'.py', '.html', '.css', '.csv', '.parquet', '.h5', '.hdf5', '.txt'}
+    target_extensions = {'.py', '.html', '.css'} #, '.csv', '.parquet', '.h5', '.hdf5', '.txt'}
     discovered_files = []
     
     try:
@@ -140,14 +140,14 @@ def generate_insights(state: AnalysisState) -> AnalysisState:
         # Prepare file summaries for analysis
         file_summaries = []
         for analysis in state['file_analyses']:
-            final_project_summary = {
+            file_summary = {
                 'filename': Path(analysis.file_path).name,
                 'type': analysis.file_type,
                 'purpose': analysis.purpose,
                 'components': analysis.key_components,
                 'imports': analysis.imports
             }
-            file_summaries.append(final_project_summary)
+            file_summaries.append(file_summary)
         
         # Get AI insights
         insights_text = perplexity.analyze_project_structure(file_summaries)
@@ -184,7 +184,7 @@ def generate_summary(state: AnalysisState) -> AnalysisState:
         python_files = len([f for f in state['file_analyses'] if f.file_type == "Python"])
         total_files = len(state['file_analyses'])
         
-        final_project_summary = f"""
+        summary_text = f"""
 # Project Analysis Summary
 
 ## Overview
@@ -200,24 +200,24 @@ def generate_summary(state: AnalysisState) -> AnalysisState:
 """
         
         for analysis in state['file_analyses'][:5]:  # Show first 5 files
-            final_project_summary += f"### {Path(analysis.file_path).name}\n"
-            final_project_summary += f"- **Type**: {analysis.file_type}\n"
-            final_project_summary += f"- **Purpose**: {analysis.purpose[:100]}...\n"
+            summary_text += f"### {Path(analysis.file_path).name}\n"
+            summary_text += f"- **Type**: {analysis.file_type}\n"
+            summary_text += f"- **Purpose**: {analysis.purpose}...\n"
             if analysis.key_components:
-                final_project_summary += f"- **Components**: {', '.join(analysis.key_components[:3])}\n"
-            final_project_summary += "\n"
+                summary_text += f"- **Components**: {', '.join(analysis.key_components)}\n"
+            summary_text += "\n"
         
         if len(state['file_analyses']) > 5:
-            final_project_summary += f"... and {len(state['file_analyses']) - 5} more files\n\n"
+            summary_text += f"... and {len(state['file_analyses']) - 5} more files\n\n"
         
-        final_project_summary += f"## Quality Assessment\n{state['project_insights'].overall_quality}\n"
+        summary_text += f"## Quality Assessment\n{state['project_insights'].overall_quality}\n"
         
         if state['error_messages']:
-            final_project_summary += f"\n## Errors Encountered\n"
+            summary_text += f"\n## Errors Encountered\n"
             for error in state['error_messages'][:3]:
-                final_project_summary += f"- {error}\n"
+                summary_text += f"- {error}\n"
         
-        state['analysis_report'] = final_project_summary
+        state['analysis_report'] = summary_text
         print("  ✅ Summary generated")
         
     except Exception as e:

@@ -43,12 +43,12 @@ def main():
         print("\n" + "="*60)
         print("ANALYSIS COMPLETE")
         print("="*60)
-        print(result['final_project_summary'])
+        print(result['analysis_report'])
         
         # Save detailed results
         output_file = Path(target_directory) / "analysis_results.txt"
         with open(output_file, 'w') as f:
-            f.write(result['final_project_summary'])
+            f.write(result['analysis_report'])
             f.write("\n\n=== DETAILED FILE ANALYSES ===\n")
             for analysis in result['file_analyses']:
                 f.write(f"\n## {Path(analysis.file_path).name}\n")
