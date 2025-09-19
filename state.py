@@ -42,5 +42,5 @@ class AnalysisState(TypedDict):
     discovered_files: List[FileMetadata]
     file_analyses: List[FileAnalysis]
     project_insights: ProjectInsights
-    final_project_summary: str
+    analysis_report: str
     error_messages: List[str]

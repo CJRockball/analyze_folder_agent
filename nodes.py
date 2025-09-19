@@ -217,12 +217,12 @@ def generate_summary(state: AnalysisState) -> AnalysisState:
             for error in state['error_messages'][:3]:
                 final_project_summary += f"- {error}\n"
         
-        state['final_project_summary'] = final_project_summary
+        state['analysis_report'] = final_project_summary
         print("  ✅ Summary generated")
         
     except Exception as e:
         state['error_messages'].append(f"Summary generation error: {str(e)}")
-        state['final_project_summary'] = "Error generating summary"
+        state['analysis_report'] = "Error generating summary"
     
     return state
 
