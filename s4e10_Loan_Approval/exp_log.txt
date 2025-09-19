@@ -1,0 +1,167 @@
+1/10
+- Open df, figure out dtypes and distributions
+Small dataset abt 60k, no missing
+Possible log age, income, emp_length
+
+######### BASELINE
+Exp 1 
+Dumped raw into 5fold cv
+5fold oof 0.935
+
+Exp 2
+Increase Trainin don't improve from 25 to 50
+5fold oof 0.957
+
+Exp 3
+Add func feat of num (log, sqrt, sq)
+5fold oof 0.0959
+First submission
+LB 0.96099
+
+Exp 4
+Adding target mean features on cats 
+5fold oof 0.09589
+LB 0.96107
+
+Exp 5 
+Adding normalized numerical features in folds
+5fold oof 0.0956
+
+Exp 6 
+Normalize num features
+5fold oof 0.9589 Same as without
+
+Exp 7 
+Using only two mean features ['person_home_ownership', 'loan_grade']
+5fold oof 0.9589
+
+Exp 8 lgbm_8.csv
+Drop features ['cb_person_cred_hist_length', 'cb_person_default_on_file']
+5fold oof 0.9596 LB 0.96082
+
+Exp 9 
+Change to 10 folds
+10fold oof 0.9595
+
+Exp 10
+Set up NN with embedding, [128, 128, 16], [0.4, 0.2, 0.2]
+5fold oof 0.9225
+
+Exp 11
+LGBM with one-hot encoding
+5fold oof 0.9587
+
+Exp 12 
+LGBM, one-hot cross features
+5fold oof 0.9586
+
+Exp 13
+LGBM one-hot cross features, 
+Feature selection top 5
+5fold oof 0.9576
+
+Exp 14 lgbm_14.csv
+logistic regression stacking of lgbm basic, lgbm oh
+LB 0.96120
+
+Exp 15 legbm_15.csv
+blend using Lasso, lgbm_basic, lgbm_oh
+LB 0.96086
+
+Exp 16 - xgb_basic.py
+Set up model for stacking
+5fold oof 0.9588
+
+Exp 17 - xgb_basic.py
+Basic Catboost. Use for stacking
+5fold oof 0.9534
+
+Exp 18 stack_18.csv
+Stacking model with [lgbm_basic, lgbm_oh, xgb_basic, cat_basic]
+Use logistic regression to stack
+Add optimized params for catsboost
+CV 0.96174
+
+Exp 19 stack_19
+Stacking only lgb
+cv 0.96149 
+
+Exp 20 stack_20.csv xgb_bassic.py
+Recalc without fold mean, std
+only xgb and cat stacked [xgb_basic, cat_basic]
+CV 0.96194
+
+Exp21 stack21.csv
+Adding lgbm back to stack
+CV 0.96237
+
+Exp22 stack22.csv
+Add original data 
+Stack with xgb, cat
+HUGE BOOST
+Cv 0.96702
+
+Exp 24 cat24.csv - cat_opt.py
+Basic catboos
+5fold oof 0.9665 CV 0.97218
+
+Exp 25 cat_25.csv
+Catboos notebook
+CV 0.97216
+
+Exp 26 cat_26.csv
+Catboost notebook no duplicates
+5fold oof 0.9662 CV 0.97228
+
+Exp 27 
+NN from notebook. New ranking/ordinality process
+Using embedded NN
+5fold oof 0.950
+
+Exp 28
+Catboost notebook, recalc loan pct income
+5fold-oof 0.9661
+
+Exp 29 nn_29.csv nn_all_emb.py
+Org data
+5fold oof 0.956 CV 0.96306
+
+Exp 30 nn_30.csv nn_all_emb.py
+30_pred, 30_oof
+all emb, expanded data, remove duplicates
+5fold oof 0.9508  CV 0,96509
+10fold oof 0.9521
+15fold oof 0.95288
+20fold oof 0.95188
+
+Exo 31 cat_31.csv oof_31, pred_31
+cat, ext data, rem duplicates
+15fold oof 0.96779 CV
+
+Exp 32 stack_32.csv
+cat,nn stack with logistic regression
+15fold oof 0.9675 CV 0.97215
+
+Exp 33 oof_33, pred_33
+try lgbm with rem dups
+15fol oof 0.9630
+
+Exp 34 oof_35, pred_35
+xgb ext data, rem duplicates
+15 fold oof 0.95698
+
+Exp 35 stck_35
+stack nn, lgbm, xgb, cat
+15fold oof 0.9688 CV 0.97265
+
+Exp 36 stack_36
+stack 35 with ridge
+15fold oof 0.9690 CV 0.97273
+
+Exp 37 nn_37 save oof37, pred37
+fixed early stopping 
+5 fold oof 0.9558  CV 0.96636
+
+Exp 38 nn_38, oof_38, pred_39
+15 fold oof 0.9563
+
