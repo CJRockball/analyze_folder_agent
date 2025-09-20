@@ -51,7 +51,8 @@ def run_analysis(target_directory: str) -> dict:
             overall_quality="Not assessed"
         ),
         "analysis_report": "",
-        "error_messages": []
+        "error_messages": [],
+        "duplication_analysis": None
     }
     
     # Create and run the agent

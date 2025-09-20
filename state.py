@@ -34,6 +34,7 @@ class ProjectInsights(BaseModel):
     estimated_timeline: str
     project_type: str
     overall_quality: str
+    duplication_analysis: Optional[Dict[str, Any]] = None
 
 
 class AnalysisState(TypedDict):

@@ -3,9 +3,12 @@
 import os
 import ast
 import subprocess
+import math
+import re
 from datetime import datetime
 from pathlib import Path
 from typing import List
+from difflib import SequenceMatcher  # ← This is built-in, no pip install needed
 
 from state import AnalysisState, FileMetadata, FileAnalysis, ProjectInsights
 from perplexity_client import PerplexityClient
@@ -51,44 +54,342 @@ def discover_files(state: AnalysisState) -> AnalysisState:
     return state
 
 
+def calculate_maintainability_index(tree: ast.AST, file_content: str) -> int:
+    """
+    Calculate Maintainability Index (0-100 scale).
+    Formula: MI = 171 - 5.2*ln(V) - 0.23*G - 16.2*ln(L)
+    """
+    import math
+    
+    lines_of_code = len([line for line in file_content.split('\n') if line.strip()])
+    cyclomatic_complexity = calculate_complexity(tree)
+    
+    # FIXED: Use the correct function name and extract volume
+    halstead_metrics = calculate_halstead_metrics(tree)
+    halstead_volume = halstead_metrics['volume']
+    
+    # Avoid log(0) errors
+    if halstead_volume <= 0 or lines_of_code <= 0:
+        return 50  # Neutral score
+    
+    mi = 171 - 5.2 * math.log(halstead_volume) - 0.23 * cyclomatic_complexity - 16.2 * math.log(lines_of_code)
+    
+    # Normalize to 0-100 scale
+    return max(0, min(100, int(mi)))
+
+
+def generate_summary(state: AnalysisState) -> AnalysisState:
+    """Generate comprehensive markdown report with all metrics."""
+    print("📋 Generating enhanced summary...")
+    
+    try:
+        python_files = len([f for f in state['file_analyses'] if f.file_type == "Python"])
+        total_files = len(state['file_analyses'])
+        
+        md_parts = [
+            "# 📊 Project Analysis Summary",
+            "",
+            "## Overview",
+            f"- **Total Files**: {total_files} ({python_files} Python files)",
+            f"- **Project Type**: {state['project_insights'].project_type}",
+            f"- **Timeline**: {state['project_insights'].estimated_timeline}",
+            "",
+            "## Research Focus",
+            f"- **Topics**: {', '.join(state['project_insights'].research_topics) or 'None identified'}",
+            f"- **Frameworks**: {', '.join(state['project_insights'].frameworks_used) or 'None identified'}",
+            ""
+        ]
+        
+        # FIXED: Safe access to duplication analysis
+        dup_data = state.get('duplication_analysis')  # ← This won't crash if key doesn't exist
+        if dup_data:
+            md_parts.extend([
+                "## Code Duplication Analysis",
+                f"- **Total Duplications Found**: {dup_data['total_duplications']}",
+                f"- **Duplication Percentage**: {dup_data['duplication_percentage']}%",
+                ""
+            ])
+            
+            if dup_data['duplications']:
+                md_parts.append("### Detected Duplications:")
+                for dup in dup_data['duplications']:
+                    md_parts.append(f"- **{dup['file1']}** ↔ **{dup['file2']}**: {dup['similarity']}% similarity")
+                md_parts.append("")
+        
+        # Rest of the function remains the same...
+        md_parts.extend([
+            "## Detailed File Analysis",
+            ""
+        ])
+        
+        for analysis in state['file_analyses']:
+            md_parts.extend([
+                f"### `{Path(analysis.file_path).name}`",
+                "",
+                f"**File Type**: {analysis.file_type}",
+                "",
+                "**Purpose**:",
+                f"> {analysis.purpose}",
+                "",
+                f"**Key Components**: {', '.join(analysis.key_components) or '—'}",
+                f"**Imports**: {', '.join(analysis.imports) or '—'}",
+                ""
+            ])
+            
+            if analysis.quality_notes:
+                md_parts.extend([
+                    "**Quality Metrics**:",
+                    ""
+                ])
+                for note in analysis.quality_notes:
+                    if note.startswith("⚠️"):
+                        md_parts.append(f"- 🚨 {note}")
+                    else:
+                        md_parts.append(f"- {note}")
+                md_parts.append("")
+        
+        # Overall assessment
+        md_parts.extend([
+            "## Quality Assessment",
+            "",
+            state['project_insights'].overall_quality,
+            ""
+        ])
+        
+        if state['error_messages']:
+            md_parts.extend([
+                "## Issues Encountered",
+                ""
+            ])
+            for error in state['error_messages']:
+                md_parts.append(f"- ⚠️ {error}")
+        
+        state['analysis_report'] = "\n".join(md_parts)
+        print("  ✅ Enhanced summary generated")
+        
+    except Exception as e:
+        state['error_messages'].append(f"Summary generation error: {str(e)}")
+        state['analysis_report'] = f"# Error Generating Summary\n\n{str(e)}"
+    
+    return state
+
+
+
+def calculate_halstead_metrics(tree: ast.AST) -> dict:
+    """Calculate Halstead complexity metrics from AST."""
+    operators = set()
+    operands = set()
+    total_operators = 0
+    total_operands = 0
+    
+    for node in ast.walk(tree):
+        # Count operators (control structures, assignments, etc.)
+        if isinstance(node, (ast.Add, ast.Sub, ast.Mult, ast.Div, ast.Mod, 
+                           ast.Pow, ast.LShift, ast.RShift, ast.BitOr, 
+                           ast.BitXor, ast.BitAnd, ast.FloorDiv)):
+            operators.add(type(node).__name__)
+            total_operators += 1
+        elif isinstance(node, (ast.And, ast.Or, ast.Not, ast.Invert, 
+                             ast.UAdd, ast.USub)):
+            operators.add(type(node).__name__)
+            total_operators += 1
+        elif isinstance(node, (ast.Eq, ast.NotEq, ast.Lt, ast.LtE, 
+                             ast.Gt, ast.GtE, ast.Is, ast.IsNot, 
+                             ast.In, ast.NotIn)):
+            operators.add(type(node).__name__)
+            total_operators += 1
+        
+        # Count operands (variables, constants, function names)
+        elif isinstance(node, ast.Name):
+            operands.add(node.id)
+            total_operands += 1
+        elif isinstance(node, (ast.Constant, ast.Num, ast.Str)):
+            operands.add(str(getattr(node, 'n', getattr(node, 's', node.value))))
+            total_operands += 1
+    
+    # Halstead metrics
+    n1 = len(operators)    # unique operators
+    n2 = len(operands)     # unique operands
+    N1 = total_operators   # total operators
+    N2 = total_operands    # total operands
+    
+    vocabulary = n1 + n2
+    length = N1 + N2
+    volume = length * (vocabulary.bit_length() if vocabulary > 0 else 1)
+    difficulty = (n1 / 2) * (N2 / n2) if n2 > 0 else 0
+    effort = difficulty * volume
+    
+    return {
+        'vocabulary': vocabulary,
+        'length': length,
+        'volume': volume,
+        'difficulty': round(difficulty, 2),
+        'effort': round(effort, 2),
+        'time_to_program': round(effort / 18, 2)  # seconds
+    }
+
+
+def detect_code_duplication(file_analyses: List[FileAnalysis]) -> dict:
+    """Detect potential code duplication across files."""
+    from difflib import SequenceMatcher
+    
+    duplications = []
+    similarity_threshold = 0.7
+    
+    python_files = [f for f in file_analyses if f.file_type == "Python"]
+    
+    for i, file1 in enumerate(python_files):
+        for j, file2 in enumerate(python_files[i+1:], i+1):
+            # Compare function signatures
+            common_functions = set(file1.key_components) & set(file2.key_components)
+            if common_functions:
+                similarity = len(common_functions) / max(len(file1.key_components), len(file2.key_components))
+                if similarity > similarity_threshold:
+                    duplications.append({
+                        'file1': Path(file1.file_path).name,
+                        'file2': Path(file2.file_path).name,
+                        'similarity': round(similarity * 100, 1),
+                        'common_elements': list(common_functions)
+                    })
+    
+    return {
+        'total_duplications': len(duplications),
+        'duplications': duplications,
+        'duplication_percentage': round(len(duplications) / len(python_files) * 100, 1) if python_files else 0
+    }
+
+
+
+def analyze_dependency_complexity(tree: ast.AST) -> dict:
+    """Analyze import dependencies and coupling."""
+    imports = []
+    from_imports = []
+    local_imports = 0
+    external_imports = 0
+    
+    standard_libs = {'os', 'sys', 'json', 'datetime', 'math', 're', 'collections', 
+                     'itertools', 'functools', 'pathlib', 'typing', 'ast', 'subprocess'}
+    
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                imports.append(alias.name)
+                if alias.name.split('.')[0] in standard_libs:
+                    external_imports += 1
+                else:
+                    local_imports += 1
+                    
+        elif isinstance(node, ast.ImportFrom):
+            if node.module:
+                from_imports.append(node.module)
+                if node.module.split('.')[0] in standard_libs:
+                    external_imports += 1
+                else:
+                    local_imports += 1
+    
+    return {
+        'total_imports': len(imports) + len(from_imports),
+        'standard_library_imports': external_imports,
+        'local_imports': local_imports,
+        'coupling_ratio': round(local_imports / (local_imports + external_imports) * 100, 1) if (local_imports + external_imports) > 0 else 0,
+        'import_diversity': len(set(imports + from_imports))
+    }
+
+
+
+def analyze_security_patterns(tree: ast.AST, file_content: str) -> dict:
+    """Detect basic security anti-patterns."""
+    security_issues = []
+    
+    # Check for hardcoded secrets
+    import re
+    secret_patterns = [
+        r'password\s*=\s*["\'][^"\']+["\']',
+        r'api_key\s*=\s*["\'][^"\']+["\']',
+        r'secret\s*=\s*["\'][^"\']+["\']',
+        r'token\s*=\s*["\'][^"\']+["\']'
+    ]
+    
+    for pattern in secret_patterns:
+        if re.search(pattern, file_content, re.IGNORECASE):
+            security_issues.append("Potential hardcoded secret")
+    
+    # Check for dangerous functions
+    dangerous_calls = []
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Call):
+            if isinstance(node.func, ast.Name):
+                if node.func.id in ['eval', 'exec', 'compile']:
+                    dangerous_calls.append(f"Use of {node.func.id}")
+    
+    return {
+        'security_score': max(0, 100 - len(security_issues) * 20 - len(dangerous_calls) * 30),
+        'issues': security_issues + dangerous_calls,
+        'total_issues': len(security_issues) + len(dangerous_calls)
+    }
+
+
 def analyze_python_files(state: AnalysisState) -> AnalysisState:
-    """Analyze Python files using AST and Perplexity."""
-    print("🐍 Analyzing Python files...")
+    """Enhanced Python file analysis with comprehensive metrics."""
+    print("🐍 Analyzing Python files with enhanced metrics...")
     
     perplexity = PerplexityClient()
     python_files = [f for f in state['discovered_files'] if f.extension == '.py']
     
     for file_meta in python_files:
         try:
-            # Read file content
             with open(file_meta.path, 'r', encoding='utf-8') as f:
                 content = f.read()
             
-            # AST analysis for structure
+            # AST analysis
             tree = ast.parse(content)
+            
+            # Basic metrics
             imports = extract_imports(tree)
             components = extract_components(tree)
             complexity = calculate_complexity(tree)
             
-            # Perplexity analysis for purpose and quality
+            # Enhanced metrics
+            maintainability = calculate_maintainability_index(tree, content)
+            halstead = calculate_halstead_metrics(tree)
+            dependency_analysis = analyze_dependency_complexity(tree)
+            security_analysis = analyze_security_patterns(tree, content)
+            
+            # AI analysis
             analysis_result = perplexity.analyze_code(content, "python")
+            
+            # Create comprehensive quality notes
+            quality_notes = [
+                f"Complexity: {complexity}",
+                f"Maintainability Index: {maintainability}/100",
+                f"Halstead Volume: {halstead['volume']}",
+                f"Import Coupling: {dependency_analysis['coupling_ratio']}%",
+                f"Security Score: {security_analysis['security_score']}/100"
+            ]
+            
+            if security_analysis['issues']:
+                quality_notes.extend([f"⚠️ {issue}" for issue in security_analysis['issues']])
             
             file_analysis = FileAnalysis(
                 file_path=file_meta.path,
                 file_type="Python",
-                purpose=f"AST Analysis + AI: {analysis_result[:200]}...",
+                purpose=f"AST Analysis + AI: {analysis_result}",
                 key_components=components,
                 imports=imports,
                 complexity_score=complexity,
-                quality_notes=[f"Complexity: {complexity}", "AI analysis included"]
+                quality_notes=quality_notes
             )
             
             state['file_analyses'].append(file_analysis)
-            print(f"  ✅ {file_meta.filename}")
+            print(f"  ✅ {file_meta.filename} (MI: {maintainability}, Security: {security_analysis['security_score']})")
             
         except Exception as e:
-            state['error_messages'].append(f"Python analysis error for {file_meta.filename}: {str(e)}")
-            print(f"  ❌ {file_meta.filename}: {str(e)}")
+            state['error_messages'].append(f"Enhanced analysis error for {file_meta.filename}: {str(e)}")
+    
+    # Project-level duplication analysis
+    if len(state['file_analyses']) > 1:
+        duplication_report = detect_code_duplication(state['file_analyses'])
+        state['project_insights'].duplication_analysis = duplication_report
     
     return state
 
@@ -109,7 +410,7 @@ def analyze_other_files(state: AnalysisState) -> AnalysisState:
             if file_meta.extension in {'.html', '.css', '.txt'}:
                 with open(file_meta.path, 'r', encoding='utf-8', errors='ignore') as f:
                     sample = f.read(500)
-                    purpose += f" | Sample: {sample[:100]}..."
+                    purpose += f" | Sample: {sample}..."
             
             file_analysis = FileAnalysis(
                 file_path=file_meta.path,
@@ -177,55 +478,121 @@ def generate_insights(state: AnalysisState) -> AnalysisState:
 
 
 def generate_summary(state: AnalysisState) -> AnalysisState:
-    """Generate final project summary."""
-    print("📋 Generating summary...")
+    """Generate comprehensive markdown report with all metrics."""
+    print("📋 Generating enhanced summary...")
     
     try:
         python_files = len([f for f in state['file_analyses'] if f.file_type == "Python"])
         total_files = len(state['file_analyses'])
         
-        summary_text = f"""
-# Project Analysis Summary
-
-## Overview
-- **Total Files**: {total_files} ({python_files} Python files)
-- **Project Type**: {state['project_insights'].project_type}
-- **Timeline**: {state['project_insights'].estimated_timeline}
-
-## Research Focus
-- **Topics**: {', '.join(state['project_insights'].research_topics)}
-- **Frameworks**: {', '.join(state['project_insights'].frameworks_used)}
-
-## File Analysis
-"""
+        # Build comprehensive markdown report
+        md_parts = [
+            "# 📊 Project Analysis Summary",
+            "",
+            "## Overview",
+            f"- **Total Files**: {total_files} ({python_files} Python files)",
+            f"- **Project Type**: {state['project_insights'].project_type}",
+            f"- **Timeline**: {state['project_insights'].estimated_timeline}",
+            "",
+            "## Research Focus",
+            f"- **Topics**: {', '.join(state['project_insights'].research_topics) or 'None identified'}",
+            f"- **Frameworks**: {', '.join(state['project_insights'].frameworks_used) or 'None identified'}",
+            ""
+        ]
         
-        for analysis in state['file_analyses'][:5]:  # Show first 5 files
-            summary_text += f"### {Path(analysis.file_path).name}\n"
-            summary_text += f"- **Type**: {analysis.file_type}\n"
-            summary_text += f"- **Purpose**: {analysis.purpose}...\n"
-            if analysis.key_components:
-                summary_text += f"- **Components**: {', '.join(analysis.key_components)}\n"
-            summary_text += "\n"
+        # Add duplication analysis if available
+        if state.get('duplication_analysis'):
+            dup_data = state.get('duplication_analysis')
+            md_parts.extend([
+                "## Code Duplication Analysis",
+                f"- **Total Duplications Found**: {dup_data['total_duplications']}",
+                f"- **Duplication Percentage**: {dup_data['duplication_percentage']}%",
+                ""
+            ])
+            
+            if dup_data['duplications']:
+                md_parts.append("### Detected Duplications:")
+                for dup in dup_data['duplications']:
+                    md_parts.append(f"- **{dup['file1']}** ↔ **{dup['file2']}**: {dup['similarity']}% similarity")
+                md_parts.append("")
         
-        if len(state['file_analyses']) > 5:
-            summary_text += f"... and {len(state['file_analyses']) - 5} more files\n\n"
+        # Detailed file analysis
+        md_parts.extend([
+            "## Detailed File Analysis",
+            ""
+        ])
         
-        summary_text += f"## Quality Assessment\n{state['project_insights'].overall_quality}\n"
+        for analysis in state['file_analyses']:
+            md_parts.extend([
+                f"### `{Path(analysis.file_path).name}`",
+                "",
+                f"**File Type**: {analysis.file_type}  ",
+                f"**Size**: {analysis.quality_notes[-1] if 'Size:' in str(analysis.quality_notes) else 'Unknown'}",
+                "",
+                "**Purpose**:",
+                f"> {analysis.purpose}",
+                "",
+                f"**Key Components**: {', '.join(analysis.key_components) or '—'}  ",
+                f"**Imports**: {', '.join(analysis.imports) or '—'}  ",
+                ""
+            ])
+            
+            # Enhanced quality metrics (if available)
+            if analysis.quality_notes:
+                md_parts.extend([
+                    "**Quality Metrics**:",
+                    ""
+                ])
+                for note in analysis.quality_notes:
+                    if note.startswith("⚠️"):
+                        md_parts.append(f"- 🚨 {note}")
+                    else:
+                        md_parts.append(f"- {note}")
+                md_parts.append("")
         
+        # Overall assessment
+        md_parts.extend([
+            "## Quality Assessment",
+            "",
+            state['project_insights'].overall_quality,
+            ""
+        ])
+        
+        # Errors section (if any)
         if state['error_messages']:
-            summary_text += f"\n## Errors Encountered\n"
-            for error in state['error_messages'][:3]:
-                summary_text += f"- {error}\n"
+            md_parts.extend([
+                "## Issues Encountered",
+                ""
+            ])
+            for error in state['error_messages']:
+                md_parts.append(f"- ⚠️ {error}")
+            md_parts.append("")
         
-        state['analysis_report'] = summary_text
-        print("  ✅ Summary generated")
+        # Final recommendations
+        md_parts.extend([
+            "## Recommendations",
+            "",
+            "### Code Quality Improvements",
+            "- Files with complexity > 10 should be refactored",
+            "- Files with maintainability index < 50 need attention", 
+            "- Address any security issues flagged above",
+            "",
+            "### Next Steps",
+            "- Review files with low quality scores",
+            "- Consider adding unit tests for complex functions",
+            "- Document any missing docstrings",
+            "",
+            f"*Report generated on {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}*"
+        ])
+        
+        state['analysis_report'] = "\n".join(md_parts)
+        print("  ✅ Enhanced summary generated")
         
     except Exception as e:
         state['error_messages'].append(f"Summary generation error: {str(e)}")
-        state['analysis_report'] = "Error generating summary"
+        state['analysis_report'] = f"# Error Generating Summary\n\n{str(e)}"
     
     return state
-
 
 # Helper functions
 def get_git_creation_date(file_path: Path) -> str:
